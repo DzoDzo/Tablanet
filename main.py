@@ -13,8 +13,13 @@
 #mozhe ng da se oslozhne, dali da zemash poslabo znaejki mozhe da ti se otvore shansa za povekje, ke se izmislee
 #tva binarnoto u knapsack da go smenam radi luda slozhenost?
 #known da sredame
+#mpzhi da se srede evaluete combos funckcija. iliii generate combinations da se proshire, ima maki povrzano so tva ama ke se srede
+#mutable da gi narpaame last_taken i first hand
+#first hand ke harkdoirame malce nee maka, pa i last taken
+import copy
 import random
 from collections import defaultdict
+
 
 dict_values = {
     # Aces
@@ -45,7 +50,8 @@ table=[]
 game_points=[]
 taken=[[],[]] #tuka so imat zemano, ke sredash dole u taa so trebashe
 print(players)
-def get_bit(n, k):        return (n >> k) & 1 #pomoshna za kombinations
+def get_bit(n, k):
+    return (n >> k) & 1 #pomoshna za kombinations
 def set_bit_indices(n: int): #brza nachin za naogjanje na bitvoi so 1 vrednost
     idxs = []
     while n:
@@ -136,8 +142,8 @@ def generate_possible(cards):
     return combinations
 
 def count_points():
-    global dict_values,table,game_points,taken
-
+    global dict_values,table,taken
+    points=[0,0]
     if len(taken[0])>len(taken[1]):
         game_points[0]+=3
     elif len(taken[1])>len(taken[0]):
@@ -146,10 +152,10 @@ def count_points():
     for i in range(2):
         for card in taken[i]:
             if card[0] in dict_values:
-                game_points[i]+=dict_values[card[0]]
+                points[i]+=dict_values[card[0]]
             elif card[0][:2] in dict_values:
-                game_points[i]+=dict_values[card[0][:2]]
-    print_state()
+                points[i]+=dict_values[card[0][:2]]
+    return points
 
 def play_best_move(index):
     #da se generire za poolto site mozhni, pa da sporede svojte vrednosti dal gi ima u dikt, i najvrednoto, a ak nema tam kee int logikta nadezhno, u dikt nekak daa vrednost i indeksi na table,funk generate_possible
@@ -181,7 +187,12 @@ def play_best_move(index):
                 print(f"Pismo! Za ekipa {index%2}")
             print_state()
             return
-    table.append(players[index].pop())
+    card=players[index].pop()
+    if card[0] == "2 detelina" or card[0] == "10 baklava":
+        known[card[1]] += 0.5  # site so gi znaat,
+    else:
+        known[card[1]] += 1  # so ja frle taj ja otkriva, 0.5 oznachuva specialni akrti kak 2 detelina i 10 baklava
+    table.append(card)
     print_state()
 
 def play_hand():
@@ -195,7 +206,9 @@ def play_round():
         deal_cards()
         play_hand()
     taken[last_taken].extend(table) #posledni karti da odat nama
-    count_points()
+    points=count_points()
+    game_points[0]+=points[0]
+    game_points[1]+=points[1]
 def startgame(num_players): #start za goelmio game
     global game_points
     global players

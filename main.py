@@ -16,20 +16,31 @@
 import random
 from collections import defaultdict
 
-dict_values={ #proverka dali celo i posle proverka dali prvi dve
-    "1 ":1,
-    "10":1,
-    "K ":1,
-    "Q ":1,
-    "J ":1,
-    "2 detelina":1,
-    "10 baklava":2
+dict_values = {
+    # Aces
+    "1 list": 1, "1 detelina": 1, "1 srce": 1, "1 baklava": 1,
+
+    # Tens (special case for 10 baklava)
+    "10 list": 1, "10 detelina": 1, "10 srce": 1, "10 baklava": 2,
+
+    # Jacks
+    "J list": 1, "J detelina": 1, "J srce": 1, "J baklava": 1,
+
+    # Queens
+    "Q list": 1, "Q detelina": 1, "Q srce": 1, "Q baklava": 1,
+
+    # Kings
+    "K list": 1, "K detelina": 1, "K srce": 1, "K baklava": 1,
+
+    # Extra scoring card
+    "2 detelina": 1,
 }
 last_taken=0
 first_hand=True
 deck=[]
 players=[] #samo so ima u rakata
-known=[]
+known=[0]*15
+print(known)
 table=[]
 game_points=[]
 taken=[[],[]] #tuka so imat zemano, ke sredash dole u taa so trebashe
@@ -47,14 +58,16 @@ def print_state():
         print("player",i,":",players[i])
     print("table",table)
     print(game_points)
+    print("known",known)
 def new_round():
     #known da go isprazne
-    global first_hand,taken
+    global first_hand,taken,known,table
     taken[0].clear()
     taken[1].clear()
     first_hand=True
     global known,deck
-    known.clear() #<-so znaame ima minano, mozhe da napraam len=14, i po edna
+    known.clear() #<-so znaame ima minano, mozhe da napraam len=15, i po edna #TODO mani go tva
+    known=[0]*15
     nta={
         "J":12,
         "Q":13,
@@ -73,11 +86,20 @@ def new_round():
             deck.append(card)
     random.shuffle(deck)
     cut=random.randint(2, 51)
-    known.append(deck[cut])
+    print(deck[cut][1])
+    if(deck[cut][0]=="2 detelina" or deck[cut][0]=="10 baklava"):
+        known[deck[cut][1]]+=0.5 #opshto known, i posle ka ke razgleduvam da dodadam so ima uf rakata
+    else:
+        known[deck[cut][1]] += 1
     #print("deck before cut",deck)
     deck=deck[:cut]+deck[cut:]
     for _ in range(4):
-        table.append(deck.pop())
+        card=deck.pop()
+        if card[0]=="2 detelina" or card[0]=="10 baklava":
+            known[card[1]]+=0.5 #site so gi znaat,
+        else:
+            known[card[1]]+=1
+        table.append(card)
     print_state()
    # print("new round players,deck,known,table", players, deck, known, table)
 def deal_cards():
@@ -98,10 +120,19 @@ def generate_possible(cards):
         z+=1
         ids=set_bit_indices(z)
         suma=0
-        for index in ids: #ids na cards na table so gi razgleduvame, ako ima vred 1 ke proba so 1 prvo, posle so 11, else redovno
+        sumA=0
+        first_ace=False
+        for index in ids:#ids na cards na table so gi razgleduvame, ako ima vred 1 ke proba so 1 prvo, posle so 11, else redovno
+            if cards[index][1]==1 and first_ace==False:
+                first_ace=True
+                sumA+=11
+            else:
+                sumA+=cards[index][1]
             suma+=cards[index][1]  #sumire site dek so bitovte se 1
         if suma<15:
             combinations[suma].append(ids) #ak e validno dodava vrednost so tii sumi tamka
+        if first_ace==True and sumA<15:
+            combinations[sumA].append(ids)
     return combinations
 
 def count_points():
@@ -135,10 +166,14 @@ def play_best_move(index):
             idxs = sorted(set(choices[card[1]][0]))  #indexi na karti so ke se zemat od masa zgolemuvajki
             to_take = [table[i] for i in idxs] #tii so ke gi zemame
             table = [x for j, x in enumerate(table) if j not in set(idxs)] #table od ka ke otstraname zemani
-
+            if card[0] == "2 detelina" or card[0] == "10 baklava":
+                known[card[1]] += 0.5  # site so gi znaat,
+            else:
+                known[card[1]] += 1 #so ja frle taj ja otkriva, 0.5 oznachuva specialni akrti kak 2 detelina i 10 baklava
             taken[index % 2].extend(to_take)
             taken[index%2].append(card)
             last_taken=index%2
+
             print("Player threw card",card,"taking",to_take)
 
             if len(table)==0 and first_hand==False:

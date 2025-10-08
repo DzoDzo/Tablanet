@@ -26,6 +26,8 @@ from __future__ import annotations
 import copy
 import math
 import random
+#SEED = 12345
+#random.seed(SEED)
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import combinations
@@ -56,6 +58,7 @@ def can_merge_without_overlap(listac,ids):
             seen.add(card)
     return True
 def possible_takes(listac): #[[(),()],[()],[()]] vaj format se prima, pak isto so binarnite so go ebam
+    #print("possible_takes gets",listac)
     viable_combos=[]
     n = len(listac)
     z = 0  # tuka ke zapishuvam koi od takvoto se probani
@@ -70,7 +73,7 @@ def possible_takes(listac): #[[(),()],[()],[()]] vaj format se prima, pak isto s
                 viable_combos.append([card for idx in sorted(ids) for card in listac[idx]])
     viable_combos.insert(0,[])
     viable_combos.sort(key=score_combo,reverse=True)
-    #print("viable combos",listac,viable_combos)
+    #print("viable combos",viable_combos)
     return viable_combos
 def generate_possible(cards): #cards se tii na table
     #ako gi sortiram, worst case , 1 2 3 4 5 6 7 8 9 10 12 13 14, male i kec treba kak 11 i 1 da se glede, 3 fors idea utre piti chat gpt
@@ -128,6 +131,7 @@ class Game(Protocol):
     def utility(self, state: Any) -> float:
         """Value from MAX's perspective at terminal or when using a heuristic cutoff."""
         #tuka treba razlika u poeni, plus se so ima na table vrednosta*verojatnosta da ja zema, znachi i deck treba
+        #da vrateme klk vrede na igracho bez None, i dole proverka, ak e None na red odzimame hevristika a ak ne e dodavame
 
         taken_s=list(state[5])
         pisma=state[6]
@@ -137,7 +141,9 @@ class Game(Protocol):
         deck_s=copy.deepcopy(state[2])
         turn=state[1]
         players_s=copy.deepcopy(state[0])
-      #print(players_s)
+        last_taken_s=state[7]
+
+        #print(players_s)
         #print()
         for card in players_s[turn]: #znaa site so znaat+negovite
             if card is not None:
@@ -152,6 +158,8 @@ class Game(Protocol):
         #tuka da imam funkcija so naogje najvredni kombinacii
         #print(table_s)
         combinations=generate_possible(table_s)
+        #print(combinations)
+        #print(generate_possible(table_s))
 
         ex=0
        #(players_s)
@@ -163,9 +171,18 @@ class Game(Protocol):
         #print("the deck is",len(deck_s))
         if len(deck_s)>0:
             for value in combinations:
+                if len(combinations[value])==-0:
+                    continue
                 #tuka treba nogo da mislam,stoj ke upraame
-                most_valuable=possible_takes(combinations[value])[0]  # za taa vrednost (1,..14) najvrednata kombinacija karti so mozhe da se zema
-                score = score_combo(most_valuable)+len(most_valuable)/52
+                most_valuable=combinations[value][0] #tuka beshe possible takes ama nogo bavno u pichko materino, tva i generate da gi napravam po efikasni mosh treba
+                                                                    # za taa vrednost (1,..14) najvrednata kombinacija karti so mozhe da se zema
+                #print("najvredno is",most_valuable)
+
+                score = score_combo(most_valuable) #da dodame vrednost na karta
+                if value in [1,10,12,13,14]:
+                    score+=1
+                if (len(most_valuable) == len(table_s)):
+                    score += 1
                 if (value != 2 or value == 2 and math.modf(known_s[2])[0] == 0.5) and (value != 10 or value == 10 and math.modf(known_s[10])[0] == 0.5): #ako ne e 2 ili e 2 ama pominana e lichna dovjka, i ako ne e 10 ili e 10 ama pominana e lichna desetka
                     cards_left= 4 - math.ceil(known_s[value]) #klk se ostanani
                     #print("cards_left",cards_left)
@@ -178,11 +195,11 @@ class Game(Protocol):
                     ex += (score+1) *hyper_geom #ako zema so nea, se znaa edna e samo
                 elif value==10 and math.modf(known_s[10])[0]!=0.5:
                     hyper_geom = 1.0 - (math.comb(total_cards_left - 1, opp_m) / math.comb(total_cards_left, opp_m) if total_cards_left >= opp_m and total_cards_left - 1 >= opp_m else 0.0)
-                    ex+= (score+2) *hyper_geom
+                    ex+= (score+1) *hyper_geom
                 #print("Adding, ",hyper_geom)
                 hyper+=hyper_geom
         else: #posledna raka od taa runda e
-            if last_taken==turn:
+            if last_taken_s==turn:
                 if len(taken_s[0])>26-len(table_s):
                     points[0]+=3                    #ako ja prava razlikta od karti da se i ne se uf nego
                 for card in table_s:
@@ -196,41 +213,48 @@ class Game(Protocol):
                     if card[0] in dict_values:
                         points[1]+=dict_values[card[0]]
         #da se srede i vrednuvane na zimane karta
+        #ako e red na taj so None u rakta, togaj odzimame, else dodavam
+        #treba segde taa logika
+        me = getattr(self, "hero", 0)
+        opp = me ^ 1
+        if turn==me:
+            EX= points[me] + (len(taken_s[me]) - len(taken_s[opp])) / 52 - points[opp] - ex
+        else:
+            EX = points[me] + (len(taken_s[me]) - len(taken_s[opp])) / 52 - points[opp] + ex
 
-        EX=points[0]-points[1]-ex
-        #print(EX, ex,hyper, points)
+        #if points[0] == points[1]:
+           #print(EX, ex,hyper, points)
         return EX
 
         #sega treba da se razgledat verojatnostite, na known_s da nadgradame so imame u rakta, 4-known_s, so dvata zaebani sluchaja / , /suma known_s mby so ceilings da se srede
     def current_player(self, state: Any) -> int:
         """+1 for MAX, -1 for MIN. (If you do Expectimax-with-random-opponent,
         you can still set -1, we’ll ignore it if using stochastic-opponent mode.)"""
-        return 1
+        return +1
     def legal_moves(self, state: Any) -> Iterable[Any]:
         #tuple of (carta frlena, [karti zemani,koj deluva<--ne za tva]
         moves=[]
         turn=state[1]
         hand=state[0][turn]
         table_s=state[3]
-        combinations=generate_possible(table_s)
-        for card in hand:
-            all_possible = []
-            #tuka treba site validni parove card --> sho zima
-            if card[1] in combinations:
-                for combos in combinations[card[1]]: #logikta ke mi e ili 1, ili site
-                    combos=tuple(combos)
-                    all_possible.extend(combos) #site subsetove gi zima i gi turuva #tva mozhe da go sredam kak so treba, so
-                    moves.append((card,combos,turn)) #tuka karta so sekoo mozhna, da napraam funckija so prima listata od listi, i glede koi imat duplikate i gi manuva t.e. podeluva na dve, pa na drugio pa taka etc.
+        combinations=generate_possible(table_s) #od tabla sho mozhe da se zema
+        for card in hand: #
 
-            moves.append((card,tuple(set(all_possible)),turn))
-            moves.append((card,(),turn))
+            all_possible=possible_takes(combinations[card[1]]) #se so mozhe da se zema taka
+            if(card[1]==1):
+                all_possible.extend(possible_takes(combinations[11])) #dodani Aces u legal moves
+            for possible in all_possible:
+                moves.append((card,tuple(possible),turn))
+        # for move in moves:
+        #     print(move)
         return tuple(moves)
 
 
     def apply_move(self, state: Any, move: Any) -> Any:
     # state=((players cards), turn,(deck),(table cards), (known),(taken),(br_pisma))
         card,cards_to_take,turn=move
-
+        if(cards_to_take==None):
+            print("Cards to take retatrd",move)
         players_s=copy.deepcopy(state[0])
         players_s=list(players_s)
         players_s[turn ^ 1]=[None for val in players_s[turn ^ 1]] #na taj so nee turn ejvaa klk me biva u pichko materino
@@ -262,7 +286,11 @@ class Game(Protocol):
             known_s[card[1]] += 1
 
         new_turn=turn ^ 1
-        new_last_taken=last_taken ^ 1
+        new_last_taken=last_taken
+        if len(cards_to_take)>0:
+            new_last_taken=turn
+
+
         phase="chance"
         #print("apply_move",players_s)
         new_state=(players_s,new_turn,state[2],new_table,tuple(known_s),tuple(taken_s),tuple(pisma),new_last_taken,phase)
@@ -294,20 +322,33 @@ class Game(Protocol):
         deck_s=list(state[2])
         combinations=generate_possible(table_s)
         outcomes=[]
+        prob=0
+        #losh kod ama
+        for value in combinations:
+            total_cards_left = 52 - sum(math.ceil(x) for x in known_s)  # klk ostanuvat vkupno, neprijatelo klk ima u rakta
+            cur_m = len(players_s[turn])
+            cards_left = 4 - math.ceil(known_s[value])  # verojatnosta e 0
+            if cards_left > 0.5:
+                p = 1.0 - (math.comb(total_cards_left - cards_left, cur_m) / math.comb(total_cards_left,cur_m) if total_cards_left >= cur_m and total_cards_left - cards_left >= cur_m else 0.0)
+                prob +=p
         for value in combinations:
             #verojatnost da ja ima taa karta u rakta
-            #TODO sredi so 10 i 2 ako imash sol u ochite
             total_cards_left=52-sum(math.ceil(x) for x in known_s) #klk ostanuvat vkupno, neprijatelo klk ima u rakta
             cur_m=len(players_s[turn])
             cards_left=4-math.ceil(known_s[value]) #verojatnosta e 0
+            sum_probs=0
             if cards_left>0.5: #u elso p==0, mosh i da nema potreba do dusha
+
                 p=1.0-(math.comb(total_cards_left-cards_left,cur_m)/math.comb(total_cards_left,cur_m)  if total_cards_left >= cur_m and total_cards_left - cards_left >= cur_m else 0.0) #hyper geom
-                possiblilities=possible_takes(combinations[value]) #site permutacii na neshta so bi mozhel da zem
+                sum_probs +=p
+                possiblilities=possible_takes(combinations[value]) #so mozhe da zema, ako
+                #print("possibiliteis",possiblilities,"for value ",value,"for combinations ",combinations[value]) #lista od listi
                 for possible in possiblilities: #ako zema tva primer so ke se dese, t.e. so table, knwon, taken, br_pisma, last_taken, phase i turn sekak se menat, i deck si ostanva isto
                     to_remove = set(possible) #Chatgpt vika za brzina
                     new_table = [c for c in table_s if c not in to_remove]
+                    new_pisma_s=list(pisma_s)
                     if len(new_table) ==0 and len(deck_s)!=0:
-                        pisma_s[turn]+=1
+                        new_pisma_s[turn]+=1
                     new_taken=copy.deepcopy(taken_s)
                     new_taken[turn].extend(possible) #na taj so moo red, u takeno, dodadi possible so e taj
                     if value==11:
@@ -325,7 +366,11 @@ class Game(Protocol):
                                 for c in pile if c and c[1] == want}
 
                         suit = next((s for s in ("list", "detelina", "srce", "baklava") if s not in used), None)
-                        card = (f"{face} {suit}", want) if suit else None
+                        if suit is None:
+                            # No suit of this rank remains -> outcome impossible; skip it
+                            continue
+                        card = (f"{face} {suit}", want)
+                        #card = (f"{face} {suit}", want) if suit else None
                         #print("Was looking for value",value,"got None, known_s for that value is ",known_s[value]) #
                     new_known_s=copy.deepcopy(known_s)
                     if value==11:
@@ -345,14 +390,15 @@ class Game(Protocol):
                     phase="deter"
                     # state=([players cards], turn,[deck],[table cards],[known],[taken],[br_pisma],last_taken,phase) phase e za da znam koga e redno random koga ne [] e touple
                     #print("cahnce outcomes ",new_players_s)
-                    new_state=(tuple(new_players_s),new_turn,tuple(deck_s),tuple(new_table),tuple(new_known_s),tuple(new_taken),tuple(pisma_s),last_taken_s,phase)
-                    outcomes.append((p,new_state))
+                    new_state=(tuple(new_players_s),new_turn,tuple(deck_s),tuple(new_table),tuple(new_known_s),tuple(new_taken),tuple(new_pisma_s),last_taken_s,phase)
+                    #print(f"{(p/prob)/len(possiblilities)} for value {value}, and for combo {possible} sumprobs {sum_probs/len(possiblilities)}")
+                    outcomes.append(((p/prob)/len(possiblilities),new_state))
         return tuple(outcomes)
 
 
 
-        #fuck super dlgo pak, znachi presmetuvash verojatnost, gledash kombinacii, so mozhe da zima, t.e. najdobro od combinations, i.e. ili site mozhni, mozhe i site mozhni realno
-        #mozhe da zema bilo koo od bilo koite ili da frle, i ako zema od table vadame tva so e zemal, zaedno so eden primer od kartata so frlil
+        # fuck super dlgo pak, znachi presmetuvash verojatnost, gledash kombinacii, so mozhe da zima, t.e. najdobro od combinations, i.e. ili site mozhni, mozhe i site mozhni realno
+        # mozhe da zema bilo koo od bilo koite ili da frle, i ako zema od table vadame tva so e zemal, zaedno so eden primer od kartata so frlil
 
 
 # ---- Node classes ----
@@ -431,30 +477,27 @@ def expecti_search(game: Game,
         transpo = {}
 
     def eval_node(node: Node) -> float:
-        # Terminal or depth cutoff
         key = None
         try:
             key = (node.depth, node.node_type, hash_state(node.state))
             if key in transpo:
-                return transpo[key]
+                node.value = transpo[key]  # <<< set it
+                return node.value
         except Exception:
-            # Fallback if state not hashable
             key = None
 
         if node.depth == 0 or game.is_terminal(node.state):
             val = game.utility(node.state)
-            if key is not None:
-                transpo[key] = val
+            if key is not None: transpo[key] = val
+            node.value = val  # <<< set it
             return val
 
-        # Expand
         children = expand(game, node, stochastic_opponent)
-
         if isinstance(node, MaxNode):
             val = max(eval_node(c) for c in children) if children else game.utility(node.state)
         elif isinstance(node, MinNode):
             val = min(eval_node(c) for c in children) if children else game.utility(node.state)
-        else:  # ChanceNode: expectation over children
+        else:
             if not children:
                 val = game.utility(node.state)
             else:
@@ -462,10 +505,11 @@ def expecti_search(game: Game,
                 probs = [getattr(c, "_prob", 1.0 / len(children)) for c in children]
                 val = sum(p * v for p, v in zip(probs, vals))
 
-        if key is not None:
-            transpo[key] = val
-        node.value = val
+        if key is not None: transpo[key] = val
+        node.value = val  # <<< set it
         return val
+
+
 
     def hash_state(s: Any) -> int:
         """Make your state hashable; adjust to your state type (tuple, dataclass, str...)."""
@@ -492,6 +536,62 @@ def expecti_search(game: Game,
         best = min(root.children, key=lambda c: c.value)
 
     return best.value, best.move
+def explain_root(game, root_state, depth, stochastic_opponent=False):
+    # Build root & expand its children once
+    root = make_node(game, root_state, depth, stochastic_opponent)
+    kids = expand(game, root, stochastic_opponent)
+
+    # Local cached eval so we don't rebuild another tree for every child
+    transpo = {}
+
+    def eval_node(node: Node) -> float:
+        key = (node.depth, node.node_type, str(node.state))
+        if key in transpo:
+            return transpo[key]
+        if node.depth == 0 or game.is_terminal(node.state):
+            v = game.utility(node.state)
+            transpo[key] = v
+            node.value = v
+            return v
+        ch = expand(game, node, stochastic_opponent)
+        if isinstance(node, MaxNode):
+            v = max(eval_node(c) for c in ch) if ch else game.utility(node.state)
+        elif isinstance(node, MinNode):
+            v = min(eval_node(c) for c in ch) if ch else game.utility(node.state)
+        else:
+            if not ch:
+                v = game.utility(node.state)
+            else:
+                vals = [eval_node(c) for c in ch]
+                probs = [getattr(c, "_prob", 1.0 / len(ch)) for c in ch]
+                v = sum(p * v for p, v in zip(probs, vals))
+        transpo[key] = v
+        node.value = v
+        return v
+
+    scored = []
+    for c in kids:
+        v = eval_node(c)
+        scored.append((v, c.move, type(c).__name__, getattr(c, "_prob", None)))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    def fmt_move(mv):
+        if mv is None: return "None"
+        card, take, who = mv
+        return f"throw {card} ; take {[x[0] for x in take]} ; by p{who}"
+
+    print("---- root options ----")
+    for v, mv, nt, p in scored:
+        if p is None:
+            print(f"{v: .3f}  {fmt_move(mv)}  node={nt}")
+        else:
+            print(f"{v: .3f}  {fmt_move(mv)}  node={nt}  p={p: .3f}")
+    print("----------------------")
+
+    if kids:
+        best = max(scored, key=lambda x: x[0])
+        print("BEST:", best[0], fmt_move(best[1]))
 
 dict_values = {
     # Aces
@@ -515,13 +615,14 @@ dict_values = {
 def score_combo(combo):
     # combo like: [('5 baklava', 5), ('J srce', 12), ...]
     return sum(dict_values.get(name, dict_values.get(name[:2], 0))
-               for name, _ in combo)
+               for name, _ in combo)+len(combo)/52
 last_taken=0
 
 deck=[]
 players=[] #samo so ima u rakata
 known=[0]*15
 #print(known)
+deal_first=0
 table=[]
 game_points=[]
 taken=[[],[]] #tuka so imat zemano, ke sredash dole u taa so trebashe
@@ -535,11 +636,12 @@ def print_state():
     print("known",known)
 def new_round():
     #known da go isprazne
-    global taken,known,table
+    global taken,known,table,deck,game_points,deal_first
+    deal_first=deal_first^1 #na drugio prvo se dele
     taken[0].clear()
     taken[1].clear()
-
-    global known,deck
+    table.clear()
+    deck=[]
     known.clear() #<-so znaame ima minano, mozhe da napraam len=15, i po edna #TODO mani go tva
     known=[0]*15
     nta={
@@ -566,7 +668,7 @@ def new_round():
     else:
         known[deck[cut][1]] += 1
     ##print("deck before cut",deck)
-    deck=deck[:cut]+deck[cut:]
+    deck = deck[cut:] + deck[:cut]
     for _ in range(4):
         card=deck.pop()
         if card[0]=="2 detelina" or card[0]=="10 baklava":
@@ -576,9 +678,10 @@ def new_round():
         table.append(card)
     #print_state()
    # #print("new round players,deck,known,table", players, deck, known, table)
-def deal_cards():
+def deal_cards(index): #na koj treba prv
     n=len(players)
-    for i in range(2*n):
+    for i in range(index,2*n+index):
+        print("dealing first to ",index)
         for _ in range(3):
             players[i%n].append(deck.pop())
    # #print("dealing cards, players",players)
@@ -597,6 +700,8 @@ def count_points(taken):
 
     for i in range(2):
         for card in taken[i]:
+            if card==None:
+                print("cards none",taken[i])
             if card[0] in dict_values:
                 points[i]+=dict_values[card[0]]
             elif card[0][:2] in dict_values:
@@ -628,20 +733,23 @@ def play_best_move(index):
         pass
 
     game = _G()
+    game.hero=index
 
     # 3) Search for the best move (tune depth as you like)
+   # explain_root(game, root_state, depth=2, stochastic_opponent=True)
     value, best_move = expecti_search(
         game=game,
         root_state=root_state,
-        depth=2,  # try 2–3; higher = slower
+        depth=3,  # try 2–3; higher = slower
         stochastic_opponent=True,
         transpo={}
     )
     #print(best_move)
     thrown=best_move[0]
     to_take=best_move[1]
+
     #players,table,taken,pismo, last taken,known
-    print("player",index,"throws",thrown)
+    print("player",index,"throws",thrown,"to_take",to_take)
     if len(to_take)>0: #ako zemal carta
         players[index]=[card for card in players[index] if card!=thrown] #frle karta
         taken[index].extend(to_take) #TODO check za touple
@@ -661,15 +769,18 @@ def play_best_move(index):
 def play_hand():
     print(players)
     print(table)
-    for i in range(len(players)*6):
+    for i in range(deal_first^1,deal_first^1+len(players)*6):
         play_best_move(i%len(players))
 
     #print_state()
 def play_round():
+
     while len(deck)>0: #nez klk e razumno tuka da stavam poslednite karti
-        deal_cards()
+        deal_cards(deal_first)
         play_hand()
+    print("round played, turn when ended",deal_first)
     taken[last_taken].extend(table) #posledni karti da odat nama
+    table.clear()
     points=count_points(taken)
     game_points[0]+=points[0]
     game_points[1]+=points[1]
@@ -685,7 +796,7 @@ def startgame(num_players): #start za goelmio game
     while(max(game_points)<101):
         new_round()
         play_round()
-        #print(game_points)
+        print(game_points)
 
 
 

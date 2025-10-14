@@ -21,13 +21,15 @@
 # ka vrakjam state na opponento kartite da se none da daa
 #site proverki za posledna raka da mi se onovat na eden player dali ima len 0
 #idea, nepoznatio player da go ispolname so gjubre vrednosti i od nih da namalvame
+#TODO negde kec i 11 dvete ti gi stava mozni
 from __future__ import annotations
 
 import copy
 import math
 import random
-#SEED = 12345
-#random.seed(SEED)
+import heapq
+# SEED = 12345
+# random.seed(SEED)
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import combinations
@@ -57,6 +59,65 @@ def can_merge_without_overlap(listac,ids):
                 return False
             seen.add(card)
     return True
+def score_combo(combo):
+    # combo like: [('5 baklava', 5), ('J srce', 12), ...]
+#print("combo",combo)
+    suma=0
+    add=0
+    for card in combo:
+        suma += card[1]
+    if suma in [1,10,11,12,13,14]:
+        add=1
+    return sum(dict_values.get(name, dict_values.get(name[:2], 0))
+               for name, _ in combo)+len(combo)/52+add
+def fabricate_card(value,cards):
+    if value==11:
+        value=1
+    hlp=["srce","list","detelina","baklava"]
+    if value==2:
+        hlp = ["srce", "list",  "baklava","detelina"]
+
+    seen=set()
+    splitted=None
+    prevod={
+        12:"J " ,
+        13:"Q ",
+        14:"K "
+    }
+    card=None
+    for card in cards:
+        if card[1]==value:
+            splitted=card[0].split(" ")
+            buja = splitted[1]
+            seen.add(buja)
+    if splitted is None:
+        #print("Zaebal si neshto, ja ti list")
+        if value in prevod:
+            card=(prevod[value]+"list",value)
+        else:
+            card=(str(value)+" list",value)
+        return card
+    for buja in hlp:
+        if buja not in seen:
+            card=(splitted[0]+" "+buja,value)
+            break
+    return card
+def draw_1ormore_with_k_illegal(n, N=52, K=4, Ka=4):
+    if N <= 0 or n <= 0 or K <= 0 or n > N:
+        return 0.0
+    den = math.comb(N, n) if 0 <= n <= N else 0
+    if den == 0:
+        return 0.0
+
+    # ensure upper arguments for comb are valid
+    if N - Ka < n:  # too many cards requested after removing illegal
+        return 1.0  # must draw at least one illegal/legal anyway
+    if N - Ka - K < n:
+        num = 0  # all remaining cards are legal
+    else:
+        num = math.comb(N - Ka, n) - math.comb(N - Ka - K, n)
+
+    return num / den if den else 0.0
 def possible_takes(listac): #[[(),()],[()],[()]] vaj format se prima, pak isto so binarnite so go ebam
     #print("possible_takes gets",listac)
     viable_combos=[]
@@ -71,10 +132,37 @@ def possible_takes(listac): #[[(),()],[()],[()]] vaj format se prima, pak isto s
         else:
             if can_merge_without_overlap(listac,ids): #ako mozhame da gi mergename
                 viable_combos.append([card for idx in sorted(ids) for card in listac[idx]])
-    viable_combos.insert(0,[])
     viable_combos.sort(key=score_combo,reverse=True)
+
+    viable_combos.append([])
     #print("viable combos",viable_combos)
+
     return viable_combos
+def most_valuable(combis):
+    best={}
+
+    for value in combis:
+        best_agregate = []
+        combo=combis[value]
+        n=len(combo)
+        missing = set(range(n))
+        max_score=0
+        cur_score=0
+        while missing:
+            agregate = list()
+            for i in range(n):
+                if not any(x in combo[i] for x in agregate) and i in missing:
+                    agregate.extend(combo[i]) #ke vratame lista od
+                    missing.discard(i)
+            agregate=list(agregate)
+            if len(agregate)!=0:
+                cur_score=score_combo(agregate)
+            if(cur_score > max_score):
+                max_score=cur_score
+                best_agregate=list(agregate)
+        best[value]=list(best_agregate)
+    #print(best)
+    return best
 def generate_possible(cards): #cards se tii na table
     #ako gi sortiram, worst case , 1 2 3 4 5 6 7 8 9 10 12 13 14, male i kec treba kak 11 i 1 da se glede, 3 fors idea utre piti chat gpt
     #dict{value:indexi na karti}
@@ -142,6 +230,8 @@ class Game(Protocol):
         turn=state[1]
         players_s=copy.deepcopy(state[0])
         last_taken_s=state[7]
+        me = getattr(self, "hero", 0)
+        opp = me ^ 1
 
         #print(players_s)
         #print()
@@ -158,75 +248,82 @@ class Game(Protocol):
         #tuka da imam funkcija so naogje najvredni kombinacii
         #print(table_s)
         combinations=generate_possible(table_s)
-        #print(combinations)
-        #print(generate_possible(table_s))
-
+        best_dict=most_valuable(combinations)
+        topk = heapq.nlargest(14, best_dict.items(),
+                              key=lambda kv: score_combo(kv[1]))
+        #print("topk",topk)
         ex=0
-       #(players_s)
-        opp_m = len(players_s[turn ^ 1]) if len(players_s) > 1 else 0 #drugio klk karti ima u rakta
+
+        opp_m = len(players_s[turn ^ 1]) if len(players_s[turn^1]) >= 1 else 0 #drugio klk karti ima u rakta
         #if  math.modf(known_s[2])[0]==0.5:
         total_cards_left = 52-sum(math.ceil(x) for x in known_s) #kolku karti imat pominato
-        hyper=0
-        hyper_geom=0
-        #print("the deck is",len(deck_s))
-        if len(deck_s)>0:
-            for value in combinations:
-                if len(combinations[value])==-0:
-                    continue
-                #tuka treba nogo da mislam,stoj ke upraame
-                most_valuable=combinations[value][0] #tuka beshe possible takes ama nogo bavno u pichko materino, tva i generate da gi napravam po efikasni mosh treba
-                                                                    # za taa vrednost (1,..14) najvrednata kombinacija karti so mozhe da se zema
-                #print("najvredno is",most_valuable)
 
-                score = score_combo(most_valuable) #da dodame vrednost na karta
-                if value in [1,10,12,13,14]:
-                    score+=1
-                if (len(most_valuable) == len(table_s)):
+        not_takeable=0
+        can_take=False
+        if len(deck_s) > 0 or len(players_s[turn]) > 0: #
+            for key,value in topk:
+                cards_left = 4 - math.ceil(known_s[1]) if key in (1, 11) else 4 - math.ceil(known_s[key])
+                if key==11:
+                    cards_left =4- math.ceil(known_s[1])
+                if not_takeable==0:
+                    p = 1.0 - (math.comb(total_cards_left - cards_left, opp_m) / math.comb(total_cards_left,opp_m) if total_cards_left >= opp_m and total_cards_left - cards_left >= opp_m else 0.0)
+                else:
+                    p=draw_1ormore_with_k_illegal(n=opp_m, N=total_cards_left,Ka=not_takeable,K=cards_left)
+                score = score_combo(value) #klk skor dobiva
+                if key==2:   #licnite da se sredat
+                    if math.modf(known_s[2])[0]!=0.5:
+                        score+=1
+                if key==10:
+                    if math.modf(known_s[10])[0]!=0.5:
+                        score+=1
+
+                if (len(value) == len(table_s)!=0):
                     score += 1
-                if (value != 2 or value == 2 and math.modf(known_s[2])[0] == 0.5) and (value != 10 or value == 10 and math.modf(known_s[10])[0] == 0.5): #ako ne e 2 ili e 2 ama pominana e lichna dovjka, i ako ne e 10 ili e 10 ama pominana e lichna desetka
-                    cards_left= 4 - math.ceil(known_s[value]) #klk se ostanani
-                    #print("cards_left",cards_left)
-                    #print("total_cards_left",total_cards_left)
-                    #print("opp_m",opp_m)
-                    hyper_geom=1.0-(math.comb(total_cards_left-cards_left,opp_m)/math.comb(total_cards_left,opp_m)  if total_cards_left >= opp_m and total_cards_left - cards_left >= opp_m else 0.0)
-                    ex+=score*hyper_geom #ochekuvane vred e klk se vrednuva
-                elif value==2 and math.modf(known_s[2])[0]!=0.5: #ako e dvojka detelina vo igra
-                    hyper_geom=1.0-(math.comb(total_cards_left-1,opp_m)/math.comb(total_cards_left,opp_m) if total_cards_left >= opp_m and total_cards_left - 1 >= opp_m else 0.0)
-                    ex += (score+1) *hyper_geom #ako zema so nea, se znaa edna e samo
-                elif value==10 and math.modf(known_s[10])[0]!=0.5:
-                    hyper_geom = 1.0 - (math.comb(total_cards_left - 1, opp_m) / math.comb(total_cards_left, opp_m) if total_cards_left >= opp_m and total_cards_left - 1 >= opp_m else 0.0)
-                    ex+= (score+1) *hyper_geom
-                #print("Adding, ",hyper_geom)
-                hyper+=hyper_geom
-        else: #posledna raka od taa runda e
-            if last_taken_s==turn:
-                if len(taken_s[0])>26-len(table_s):
-                    points[0]+=3                    #ako ja prava razlikta od karti da se i ne se uf nego
-                for card in table_s:
-                    if card[0] in dict_values:
-                        points[0]+=dict_values[card[0]]
-
+                #print(f"prob for {key}: {p}, not_takeable {not_takeable}")
+                not_takeable += cards_left
+                ex += score * p
+            if (
+                    opp_m <= 0
+                    or total_cards_left <= 0
+                    or opp_m > total_cards_left
+                    or total_cards_left - not_takeable <= 0
+                    or opp_m > total_cards_left - not_takeable
+            ):
+                p_none = 0.0
             else:
-                if len(taken_s[1])>26-len(table_s):
-                    points[1]+=3
-                for card in table_s:
-                    if card[0] in dict_values:
-                        points[1]+=dict_values[card[0]]
-        #da se srede i vrednuvane na zimane karta
-        #ako e red na taj so None u rakta, togaj odzimame, else dodavam
-        #treba segde taa logika
+                p_none = math.comb(total_cards_left - not_takeable, opp_m) / math.comb(total_cards_left, opp_m)
+            if turn==me:
+                #print("Entered utility for my turn")
+                value_to_combo = dict(topk)
+                for card in players_s[turn]:
+                    if card[1] in value_to_combo:
+                        #print("Adding points of max combo to my turn, ",me,turn)
+                        can_take=True
+                        if card[1]==1:
+                            ex += score_combo(value_to_combo[11])
+                        elif card[0]=="2 detelina" or card[0]=="10 baklava":
+                            ex += score_combo(value_to_combo[card[1]])+1 #tva e ofcourse pozitivno, ama ak ne flexe tuak
+                        else:
+                            ex += score_combo(value_to_combo[card[1]])
+        #print("pinon",p_none)
+        else:#evaluatenuvame krajna pozicija ako nema vekje karti u raktta
+            for card in table_s:
+                if card[0] in dict_values:
+                    points[last_taken_s] += dict_values[card[0]]
+                if len(table_s)+len(players_s[last_taken_s]) > 26 > len(players_s[last_taken_s]) and len(players_s[last_taken_s^1])<26:
+                    points[last_taken_s] +=3
+
         me = getattr(self, "hero", 0)
         opp = me ^ 1
-        if turn==me:
-            EX= points[me] + (len(taken_s[me]) - len(taken_s[opp])) / 52 - points[opp] - ex
-        else:
-            EX = points[me] + (len(taken_s[me]) - len(taken_s[opp])) / 52 - points[opp] + ex
 
-        #if points[0] == points[1]:
-           #print(EX, ex,hyper, points)
+        if can_take: #i obratno treba da proba
+            EX= points[me] + (len(taken_s[me]) - len(taken_s[opp])) / 52 - points[opp] + ex
+
+        else:
+            EX = points[me] + (len(taken_s[me]) - len(taken_s[opp])) / 52 - points[opp] - ex
+
         return EX
 
-        #sega treba da se razgledat verojatnostite, na known_s da nadgradame so imame u rakta, 4-known_s, so dvata zaebani sluchaja / , /suma known_s mby so ceilings da se srede
     def current_player(self, state: Any) -> int:
         """+1 for MAX, -1 for MIN. (If you do Expectimax-with-random-opponent,
         you can still set -1, we’ll ignore it if using stochastic-opponent mode.)"""
@@ -239,10 +336,10 @@ class Game(Protocol):
         table_s=state[3]
         combinations=generate_possible(table_s) #od tabla sho mozhe da se zema
         for card in hand: #
-
-            all_possible=possible_takes(combinations[card[1]]) #se so mozhe da se zema taka
-            if(card[1]==1):
-                all_possible.extend(possible_takes(combinations[11])) #dodani Aces u legal moves
+            if card[1]==1:
+                all_possible=possible_takes(combinations[11]) #se so mozhe da se zema taka
+            else:
+                all_possible=possible_takes(combinations[card[1]]) #dodani Aces u legal moves
             for possible in all_possible:
                 moves.append((card,tuple(possible),turn))
         # for move in moves:
@@ -253,11 +350,11 @@ class Game(Protocol):
     def apply_move(self, state: Any, move: Any) -> Any:
     # state=((players cards), turn,(deck),(table cards), (known),(taken),(br_pisma))
         card,cards_to_take,turn=move
-        if(cards_to_take==None):
-            print("Cards to take retatrd",move)
+        #if(cards_to_take==None):
+            #prit("Cards to take retatrd",move)
         players_s=copy.deepcopy(state[0])
         players_s=list(players_s)
-        players_s[turn ^ 1]=[None for val in players_s[turn ^ 1]] #na taj so nee turn ejvaa klk me biva u pichko materino
+        #players_s[turn ^ 1]=[None for val in players_s[turn ^ 1]] #na taj so nee turn ejvaa klk me biva u pichko materino
         taken_s = list(copy.deepcopy(state[5])) #so imat zemano do sega
         pisma = list(state[6])
         table_s = list(state[3])
@@ -305,14 +402,16 @@ class Game(Protocol):
             return phase == "chance"
         except Exception:
             return False
-    def chance_outcomes(self, state: Any) -> Iterable[Tuple[float, Any]]:
+    def chance_outcomes(self, state: Any) -> Iterable[Tuple[float, Any]]: #znachi imash chance i se so mozhe da naprava protivniko, dali da odam apsolutno ili nekak poefikasno
         """Return all (probability, next_state) from this random event.
         Probabilities must sum to 1."""
         # state=([players cards], turn,[deck],[table cards],[known],[taken],[br_pisma],last_taken,phase) phase e za da znam koga e redno random koga ne [] e touple
         #tuka sreduva phase da e "deter"
         #ke razgledam samo zimane otii preterano
         #print("Chance outcoems called")
+        #idea, da raz
         players_s=list(state[0]) #ne ti treba mislam
+
         table_s=list(state[3])
         known_s=list(state[4])
         taken_s=copy.deepcopy(state[5])
@@ -324,81 +423,218 @@ class Game(Protocol):
         outcomes=[]
         prob=0
         #losh kod ama
-        for value in combinations:
-            total_cards_left = 52 - sum(math.ceil(x) for x in known_s)  # klk ostanuvat vkupno, neprijatelo klk ima u rakta
-            cur_m = len(players_s[turn])
-            cards_left = 4 - math.ceil(known_s[value])  # verojatnosta e 0
-            if cards_left > 0.5:
-                p = 1.0 - (math.comb(total_cards_left - cards_left, cur_m) / math.comb(total_cards_left,cur_m) if total_cards_left >= cur_m and total_cards_left - cards_left >= cur_m else 0.0)
-                prob +=p
-        for value in combinations:
-            #verojatnost da ja ima taa karta u rakta
-            total_cards_left=52-sum(math.ceil(x) for x in known_s) #klk ostanuvat vkupno, neprijatelo klk ima u rakta
-            cur_m=len(players_s[turn])
-            cards_left=4-math.ceil(known_s[value]) #verojatnosta e 0
-            sum_probs=0
-            if cards_left>0.5: #u elso p==0, mosh i da nema potreba do dusha
+        takeable=[]
+        total_cards_left = 52 - sum(math.ceil(x) for x in known_s)+len(players_s[turn])  # klk ostanuvat vkupno, neprijatelo klk ima u rakta
+        cur_m = len(players_s[turn])
 
-                p=1.0-(math.comb(total_cards_left-cards_left,cur_m)/math.comb(total_cards_left,cur_m)  if total_cards_left >= cur_m and total_cards_left - cards_left >= cur_m else 0.0) #hyper geom
-                sum_probs +=p
-                possiblilities=possible_takes(combinations[value]) #so mozhe da zema, ako
-                #print("possibiliteis",possiblilities,"for value ",value,"for combinations ",combinations[value]) #lista od listi
-                for possible in possiblilities: #ako zema tva primer so ke se dese, t.e. so table, knwon, taken, br_pisma, last_taken, phase i turn sekak se menat, i deck si ostanva isto
-                    to_remove = set(possible) #Chatgpt vika za brzina
-                    new_table = [c for c in table_s if c not in to_remove]
-                    new_pisma_s=list(pisma_s)
-                    if len(new_table) ==0 and len(deck_s)!=0:
-                        new_pisma_s[turn]+=1
-                    new_taken=copy.deepcopy(taken_s)
-                    new_taken[turn].extend(possible) #na taj so moo red, u takeno, dodadi possible so e taj
-                    if value==11:
-                        card = next(((name, val) for (name, val) in deck_s if val == 1), None) #primer za kartata so bi ja frlil, radi consistency
-                    else:
-                        card = next(((name, val) for (name, val) in deck_s if val == value), None) #primer za kartata so bi ja frlil, radi consistency
+        best_dict = most_valuable(combinations)
+        topk = heapq.nlargest(14, best_dict.items(),
+                              key=lambda kv: score_combo(kv[1]))
+        best_moves_dict = dict(topk)
+        not_takeable=0
 
-                    if card==None:
-                        want = 1 if value == 11 else value
-                        face = {12: "J", 13: "Q", 14: "K"}.get(want, str(want))
+        p_none = 0
+        taking_cards=[]
 
-                        # suits already seen for this rank (ignore None)
-                        used = {c[0].split()[1]
-                                for pile in (players_s[turn], table_s, *taken_s)
-                                for c in pile if c and c[1] == want}
+        new_players_s = list(copy.deepcopy(players_s))
+        if len(players_s[turn]) > 0:
+            # players_s[turn].pop() #mu se skratuva dolzhiinta za 1, za idni matematiki
+            new_players_s[turn].pop()
+        new_turn = turn ^ 1
+        phase = "deter"
 
-                        suit = next((s for s in ("list", "detelina", "srce", "baklava") if s not in used), None)
-                        if suit is None:
-                            # No suit of this rank remains -> outcome impossible; skip it
-                            continue
-                        card = (f"{face} {suit}", want)
-                        #card = (f"{face} {suit}", want) if suit else None
-                        #print("Was looking for value",value,"got None, known_s for that value is ",known_s[value]) #
-                    new_known_s=copy.deepcopy(known_s)
-                    if value==11:
-                        new_known_s[1]+=1 #oti frle takva karta i saa ja znaame
-                    else:
-                        new_known_s[value] += 1
-                    if len(possible)>0:
-                        new_taken[turn].append(card)
-                        last_taken_s=turn
-                    else:
-                        new_table.append(card)
-                    new_players_s = list(copy.deepcopy(players_s))
-                    if len(players_s[turn])>0:
-                       #players_s[turn].pop() #mu se skratuva dolzhiinta za 1, za idni matematiki
-                        new_players_s[turn].pop()
-                    new_turn=turn^1
-                    phase="deter"
-                    # state=([players cards], turn,[deck],[table cards],[known],[taken],[br_pisma],last_taken,phase) phase e za da znam koga e redno random koga ne [] e touple
-                    #print("cahnce outcomes ",new_players_s)
-                    new_state=(tuple(new_players_s),new_turn,tuple(deck_s),tuple(new_table),tuple(new_known_s),tuple(new_taken),tuple(new_pisma_s),last_taken_s,phase)
-                    #print(f"{(p/prob)/len(possiblilities)} for value {value}, and for combo {possible} sumprobs {sum_probs/len(possiblilities)}")
-                    outcomes.append(((p/prob)/len(possiblilities),new_state))
+        for key, value in topk:
+            taking_cards.append(key)
+            cards_left = 4 - math.ceil(known_s[1]) if key in (1, 11) else 4 - math.ceil(known_s[key])
+            if key == 11:
+                cards_left = 4 - math.ceil(known_s[1])
+            if not_takeable == 0:
+                p = 1.0 - (math.comb(total_cards_left - cards_left, cur_m) / math.comb(total_cards_left,
+                                                                                       cur_m) if total_cards_left >= cur_m and total_cards_left - cards_left >= cur_m else 0.0)
+            else:
+                p = draw_1ormore_with_k_illegal(n=cur_m, N=total_cards_left, Ka=not_takeable, K=cards_left)
+            prob += p
+            to_throw=fabricate_card(key,players_s[turn]+deck_s)
+            to_remove = set(value)
+            new_known_s=copy.deepcopy(known_s)
+            new_taken=copy.deepcopy(taken_s)
+            new_table=copy.deepcopy(table_s)
+
+            new_pisma_s = list(pisma_s)
+
+            new_table = [c for c in table_s if c not in to_remove]
+            not_takeable += cards_left
+            if len(new_table) == 0 and len(deck_s) != 0:
+                new_pisma_s[turn] += 1
+            if key == 11:
+                new_known_s[1] += 1  # oti frle takva karta i saa ja znaame
+            elif to_throw[0]=="2 detelina" or to_throw[0]=="10 baklava":
+                new_known_s[key] += 0.5
+            else:
+                new_known_s[key] += 1
+            if len(value) > 0:
+                new_taken[turn].append(to_throw)
+                last_taken_s = turn
+            else:
+                new_table.append(to_throw)
+
+            new_state = (
+            tuple(new_players_s), new_turn, tuple(deck_s), tuple(new_table), tuple(new_known_s), tuple(new_taken),
+            tuple(new_pisma_s), last_taken_s, phase)
+
+            outcomes.append((p , new_state))
+
+        p_this=0
+        for value in [1,2,3,4,5,6,7,8,9,10,12,13,14]:
+            if value not in taking_cards:
+                if known_s[value] == 3:
+                    to_throw_this=fabricate_card(value,players_s[turn]+deck_s)
+                    p_this=draw_1ormore_with_k_illegal(n=cur_m, N=total_cards_left,Ka=not_takeable,K=1)
+                to_throw=fabricate_card(value,players_s[turn]+deck_s)
+
+        if p_this >0:
+            new_table=copy.deepcopy(table_s)
+            new_table.append(to_throw_this)
+            new_known_s=copy.deepcopy(known_s)
+
+            if to_throw_this[1] == 11:
+                new_known_s[1] += 1  # oti frle takva karta i saa ja znaame
+            elif to_throw_this[0] == "2 detelina" or to_throw_this[0] == "10 baklava":
+                new_known_s[to_throw_this[1]] += 0.5
+            else:
+                new_known_s[to_throw_this[1]] += 1
+
+            new_state = (
+                tuple(new_players_s), new_turn, tuple(deck_s), tuple(new_table), tuple(new_known_s), tuple(taken_s),
+                tuple(pisma_s), last_taken_s, phase)
+
+            outcomes.append((p_this, new_state))
+
+        p_none=1-prob-p_this #prva karta so mozhe da ja zabode
+        if p_none > 0:
+            new_table = copy.deepcopy(table_s)
+            new_table.append(to_throw)
+            new_known_s = copy.deepcopy(known_s)
+
+            if to_throw[1] == 11:
+                new_known_s[1] += 1  # oti frle takva karta i saa ja znaame
+            elif to_throw[0] == "2 detelina" or to_throw[0] == "10 baklava":
+                new_known_s[to_throw[1]] += 0.5
+            else:
+                new_known_s[to_throw[1]] += 1
+
+            new_state = (
+                tuple(new_players_s), new_turn, tuple(deck_s), tuple(new_table), tuple(new_known_s), tuple(taken_s),
+                tuple(pisma_s), last_taken_s, phase)
+
+            outcomes.append((p_none, new_state))
+
+
+
+        # for value in combinations:
+        #     takeable.append(value)
+        #     cards_left = 4 - math.ceil(known_s[value])  # verojatnosta e 0
+        #     if cards_left > 0.5:
+        #         p = 1.0 - (math.comb(total_cards_left - cards_left, cur_m) / math.comb(total_cards_left,cur_m) if total_cards_left >= cur_m and total_cards_left - cards_left >= cur_m else 0.0)
+        #         prob +=p #p e veojatnsota da ima karta za tva combo
+        #     #print(f"for value {value}, prob is {p}")
+        # #od takeable da izbroom klk ima,i posle niz dec da najdam nekoo so [1] not in takebla,jako
+        # num_restircted=0
+        # for card_val in takeable:
+        #     num_restircted+=math.ceil(known_s[card_val])
+        # #ver da ne izvleche ni edna
+        # if total_cards_left-num_restircted>=1: #ako se site restricted taman e "verojatnosta si tere
+        #     p_none=math.comb(total_cards_left-num_restircted,cur_m)/math.comb(total_cards_left,cur_m)
+        #     if prob==0:
+        #         p_none=1
+        #     prob+=p_none
+        #     thrown_card=None
+        #     for card in deck_s+players_s[turn^1]:
+        #         if card[1] not in takeable:
+        #             thrown_card=card
+        #     if thrown_card is None:
+        #         print("Function is being used")
+        #         for value in [1,2,3,4,5,6,7,8,9,10,11,12,13,14]:
+        #             if value not in takeable:
+        #                 print("Function is being used inner")
+        #                 thrown_card=fabricate_card(value,deck_s+players_s[turn^1])
+        #                 print("thrown_card",thrown_card)
+        #                 break
+        #     if thrown_card is not None:
+        #         new_table=copy.deepcopy(table_s)
+        #         new_table.append(thrown_card)
+        #         new_table=tuple(new_table)
+        #         new_players_s=copy.deepcopy(players_s)
+        #         new_known_s=copy.deepcopy(known_s)
+        #         if thrown_card[0]=="10 baklava" or thrown_card[0]=="2 detelina":
+        #             new_known_s[thrown_card[1]]+=0.5
+        #         else:
+        #             new_known_s[thrown_card[1]]+=1
+        #         if len(players_s[turn]) > 0:
+        #             # players_s[turn].pop() #mu se skratuva dolzhiinta za 1, za idni matematiki
+        #             new_players_s[turn].pop()
+        #         new_turn = turn ^ 1
+        #         phase = "deter"
+        #         new_state = (
+        #         tuple(new_players_s), new_turn, tuple(deck_s), tuple(new_table), tuple(new_known_s), tuple(taken_s),
+        #         tuple(pisma_s), last_taken_s, phase)
+        #         if prob==0:
+        #             print(f"Prbo is 0 while pnon and total cards left {total_cards_left} and num_forbiddenis {num_restircted}  ",p_none,players_s,"\n",table_s,"\n",deck_s)
+        #         outcomes.append((p_none/prob,new_state))
+        # for value in combinations:
+        #     val = value
+        #     if value == 11:
+        #         val = 1
+        #     #verojatnost da ja ima taa karta u rakta
+        #     total_cards_left=52-sum(math.ceil(x) for x in known_s) #klk ostanuvat vkupno, neprijatelo klk ima u rakta
+        #     cur_m=len(players_s[turn])
+        #     cards_left=4-math.ceil(known_s[val]) #verojatnosta e 0
+        #
+        #     if cards_left>0.5: #u elso p==0, mosh i da nema potreba do dusha
+        #
+        #         p=1.0-(math.comb(total_cards_left-cards_left,cur_m)/math.comb(total_cards_left,cur_m)  if total_cards_left >= cur_m and total_cards_left - cards_left >= cur_m else 0.0) #hyper geom
+        #
+        #         possible=best_dict[value]  #so mozhe da zema, ako
+        #         #possibilities=possible_takes(combinations[value])
+        #         #print(f"Moznosti za {value},",possiblilities)
+        #         #print("possibiliteis",possiblilities,"for value ",value,"for combinations ",combinations[value]) #lista od listi
+        #        # for possible in possiblilities: #ako zema tva primer so ke se dese, t.e. so table, knwon, taken, br_pisma, last_taken, phase i turn sekak se menat, i deck si ostanva isto
+        #         to_remove = set(possible) #Chatgpt vika za brzina
+        #
+        #         new_table = [c for c in table_s if c not in to_remove]
+        #         new_pisma_s=list(pisma_s)
+        #         if len(new_table) ==0 and len(deck_s)!=0:
+        #             new_pisma_s[turn]+=1
+        #         new_taken=copy.deepcopy(taken_s)
+        #         new_taken[turn].extend(possible) #na taj so moo red, u takeno, dodadi possible so e taj
+        #         new_known_s=copy.deepcopy(known_s)
+        #
+        #         card=fabricate_card(value,deck_s+players_s[turn])
+        #         print("card after",card)
+        #         if value==11:
+        #             new_known_s[1]+=1 #oti frle takva karta i saa ja znaame
+        #         else:
+        #             new_known_s[value] += 1
+        #         if len(possible)>0:
+        #             new_taken[turn].append(card)
+        #             last_taken_s=turn
+        #         else:
+        #             new_table.append(card)
+        #         new_players_s = list(copy.deepcopy(players_s))
+        #         if len(players_s[turn])>0:
+        #            #players_s[turn].pop() #mu se skratuva dolzhiinta za 1, za idni matematiki
+        #             new_players_s[turn].pop()
+        #         new_turn=turn^1
+        #         phase="deter"
+        #         # state=([players cards], turn,[deck],[table cards],[known],[taken],[br_pisma],last_taken,phase) phase e za da znam koga e redno random koga ne [] e touple
+        #         #print("cahnce outcomes ",new_players_s)
+        #         new_state=(tuple(new_players_s),new_turn,tuple(deck_s),tuple(new_table),tuple(new_known_s),tuple(new_taken),tuple(new_pisma_s),last_taken_s,phase)
+        #         #print(f"{(p/prob)/len(possiblilities)} for value {value}, and for combo {possible} sumprobs {sum_probs/len(possiblilities)}")
+        #         outcomes.append(((p/prob),new_state))
+        # #print(f"sum_probs={sum(p for p, _ in outcomes):.6f}")
+        #if sum(p for p, _ in outcomes)<1:
+            #print("Prob for none =0", prob, p_none,p_this,players_s[turn], "\n", table_s, "\n", players_s[turn ^ 1])
         return tuple(outcomes)
-
-
-
-        # fuck super dlgo pak, znachi presmetuvash verojatnost, gledash kombinacii, so mozhe da zima, t.e. najdobro od combinations, i.e. ili site mozhni, mozhe i site mozhni realno
-        # mozhe da zema bilo koo od bilo koite ili da frle, i ako zema od table vadame tva so e zemal, zaedno so eden primer od kartata so frlil
 
 
 # ---- Node classes ----
@@ -612,10 +848,7 @@ dict_values = {
     # Extra scoring card
     "2 detelina": 1,
 }
-def score_combo(combo):
-    # combo like: [('5 baklava', 5), ('J srce', 12), ...]
-    return sum(dict_values.get(name, dict_values.get(name[:2], 0))
-               for name, _ in combo)+len(combo)/52
+
 last_taken=0
 
 deck=[]
@@ -681,7 +914,7 @@ def new_round():
 def deal_cards(index): #na koj treba prv
     n=len(players)
     for i in range(index,2*n+index):
-        print("dealing first to ",index)
+        #print("dealing first to ",index)
         for _ in range(3):
             players[i%n].append(deck.pop())
    # #print("dealing cards, players",players)
@@ -727,44 +960,81 @@ def play_best_move(index):
         last_taken,  # last_taken team
         "act",  # phase
     )
+    thrown=None
+    if index==1:
+        took=False
+        best_moves=most_valuable(generate_possible(table))
+        topk = heapq.nlargest(14, best_moves.items(),
+                              key=lambda kv: score_combo(kv[1]))
+        best_moves_dict=dict(topk)
+        #print("best_moves",best_moves_dict)
+        for card in players[index]:
+            if card[1] in best_moves_dict:
+                took=True
+                thrown=card
 
+                to_take=best_moves[card[1]]
+                taken[index].extend(to_take)  # TODO check za touple
+                taken[index].append(thrown)
+                last_taken = index
+                table = [val for val in table if val not in to_take]
+                if (len(table) == 0) and (len(deck) > 0):
+                    game_points[index] += 1
+        print("player 0 throws", thrown)
+        if took==False:
+            most_thrown=-1
+            thrown=None
+            #najdame najretka karta
+            for card in players[index]:
+                if known[card[1]] > most_thrown:
+                    thrown=card
+                    most_thrown=known[card[1]]
+            table.append(thrown)
+        players[index] = [card for card in players[index] if card != thrown]  # frle karta
+        print("player 0 throws", thrown)
+        if thrown[0] == "10 baklava" or thrown[0] == "2 detelina":
+            known[thrown[1]] += 0.5
+        else:
+            known[thrown[1]] += 1
+        print(table)
     # 2) Concrete game instance (inherits the methods you wrote on Game)
-    class _G(Game):
-        pass
-
-    game = _G()
-    game.hero=index
-
-    # 3) Search for the best move (tune depth as you like)
-   # explain_root(game, root_state, depth=2, stochastic_opponent=True)
-    value, best_move = expecti_search(
-        game=game,
-        root_state=root_state,
-        depth=3,  # try 2–3; higher = slower
-        stochastic_opponent=True,
-        transpo={}
-    )
-    #print(best_move)
-    thrown=best_move[0]
-    to_take=best_move[1]
-
-    #players,table,taken,pismo, last taken,known
-    print("player",index,"throws",thrown,"to_take",to_take)
-    if len(to_take)>0: #ako zemal carta
-        players[index]=[card for card in players[index] if card!=thrown] #frle karta
-        taken[index].extend(to_take) #TODO check za touple
-        taken[index].append(thrown)
-        last_taken=index
-        table=[val for val in table if val not in to_take]
-        if (len(table)==0) and (len(deck)>0):
-            game_points[index]+=1
     else:
-        players[index] = [card for card in players[index] if card != thrown]
-        table.append(thrown)
-    if thrown[0] == "10 baklava" or thrown[0] == "2 detelina":
-        known[thrown[1]] += 0.5
-    else:
-        known[thrown[1]] += 1
+        class _G(Game):
+            pass
+
+        game = _G()
+        game.hero=index
+
+        # 3) Search for the best move (tune depth as you like)
+        explain_root(game, root_state, depth=3, stochastic_opponent=True)
+        value, best_move = expecti_search(
+            game=game,
+            root_state=root_state,
+            depth=3,  # try 2–3; higher = slower
+            stochastic_opponent=True,
+            transpo={}
+        )
+        #print(best_move)
+        thrown=best_move[0]
+        to_take=best_move[1]
+
+        #players,table,taken,pismo, last taken,known
+        print("player",index,"throws",thrown,"to_take",to_take)
+        if len(to_take)>0: #ako zemal carta
+            players[index]=[card for card in players[index] if card!=thrown] #frle karta
+            taken[index].extend(to_take) #TODO check za touple
+            taken[index].append(thrown)
+            last_taken=index
+            table=[val for val in table if val not in to_take]
+            if (len(table)==0) and (len(deck)>0):
+                game_points[index]+=1
+        else:
+            players[index] = [card for card in players[index] if card != thrown]
+            table.append(thrown)
+        if thrown[0] == "10 baklava" or thrown[0] == "2 detelina":
+            known[thrown[1]] += 0.5
+        else:
+            known[thrown[1]] += 1
     print(table)
 def play_hand():
     print(players)
@@ -778,7 +1048,7 @@ def play_round():
     while len(deck)>0: #nez klk e razumno tuka da stavam poslednite karti
         deal_cards(deal_first)
         play_hand()
-    print("round played, turn when ended",deal_first)
+    #print("round played, turn when ended",deal_first)
     taken[last_taken].extend(table) #posledni karti da odat nama
     table.clear()
     points=count_points(taken)

@@ -229,8 +229,9 @@ def evaluate_table(table,top_combos,known_s,lenth_hand): #da issimuliram raci
 def simulate_table(most_valuable,hand_lenth,cards_left,sims):
     max_valued_combo=-1
     sum=0
-    simulated_hand=random.sample(cards_left, k=hand_lenth)
+
     for i in range(sims):
+        simulated_hand = random.sample(cards_left, k=hand_lenth)
         for card in simulated_hand:
             value=card[1]
             if card[1]==1:
@@ -385,7 +386,7 @@ class Game(Protocol):
         points=[0,0]
         if len(players_s[1])==0 and len(players_s[0])==0: #ako dvujcata neamt karti, dodadi ako prazen table taj soo nared -0.5
             if len(deck_s)>0:
-                points[turn]+=simulate_table(most_valuable=best_dict,hand_lenth=6,cards_left=deck_s,sims=50) #slednio pat ke ima 6 kartio
+                points[turn]+=simulate_table(most_valuable=best_dict,hand_lenth=6,cards_left=deck_s,sims=200) #slednio pat ke ima 6 kartio
             # else:
             #     points[last_taken_s]+=table_points(table_s)
             #     if len(taken_s[last_taken_s])+len(table_s)>26:
@@ -419,7 +420,7 @@ class Game(Protocol):
                     tmp_combinations = generate_possible(tmp_table) #bavno ama da go ebam saa :D
                     tmp_best_dict = most_valuable(tmp_combinations)
                     tmp_topk = heapq.nlargest(14, tmp_best_dict.items(), key=lambda kv: score_combo(kv[1])) #novata sostojba na table
-                    points[opp]+=simulate_table(most_valuable=best_dict,hand_lenth=6,cards_left=deck_s,sims=50) #povtorno ke ima site karti dushmano
+                    points[opp]+=simulate_table(most_valuable=best_dict,hand_lenth=6,cards_left=deck_s,sims=200) #povtorno ke ima site karti dushmano
             else:
                 #print(tmp_table)
                 points[tmp_lt]+=table_points(tmp_table)
@@ -431,7 +432,7 @@ class Game(Protocol):
            # print("opponents hand emtpy")
         elif len(players_s[me])==0: #jas nemam dushmano ima edna,ver da zema mosh treba u sluchaj dek==0, ono mozhame da proverame dali negovata karta zima nesh
             if len(deck_s)>0:
-                points[opp]+=simulate_table(most_valuable=best_dict,hand_lenth=6,cards_left=list(deck_s)+list(players_s[opp]),sims=50)
+                points[opp]+=simulate_table(most_valuable=best_dict,hand_lenth=6,cards_left=list(deck_s)+list(players_s[opp]),sims=200)
             else:
                 if players_s[opp][0][1] in best_dict: #ako mozhe da zema, zima, pa broome dali ima pokje
                     if players_s[opp][0][1] in dict_values:
@@ -1395,11 +1396,11 @@ def play_best_move(index):
         game.hero=index
 
         # 3) Search for the best move (tune depth as you like)
-        explain_root(game, root_state, depth=4, stochastic_opponent=True)
+        #explain_root(game, root_state, depth=4, stochastic_opponent=True)
         value, best_move = expecti_search(
             game=game,
             root_state=root_state,
-            depth=4,  # try 2–3; higher = slower
+            depth=2,  # try 2–3; higher = slower
             stochastic_opponent=True,
             transpo={}
         )

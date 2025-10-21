@@ -39,6 +39,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from itertools import combinations
 from typing import Any, Iterable, List, Tuple, Protocol, Optional, Literal, Dict
+from functools import lru_cache
+
 
 def get_bit(n, k):
     return (n >> k) & 1 #pomoshna za kombinations
@@ -65,8 +67,12 @@ def can_merge_without_overlap(listac,ids):
             seen.add(card)
     return True
 def table_points(table):
-    return sum(dict_values.get(name, dict_values.get(name[:2], 0))
-               for (name, _) in table if name)
+    suma=0
+    for card in table:
+        suma+=dict_values.get(card[0],0)
+    return suma
+    # return sum(dict_values.get(name, dict_values.get(name[:2], 0))
+    #            for (name, _) in table if name)
 
 def p_no_forbidden(m, b, k):
     g = m - b
@@ -166,7 +172,7 @@ def fabricate_card(value,cards):
             card=(splitted[0]+" "+buja,value)
             break
     return card
-def play_out(me,turn,player_s,known_s,decky,tabley,sims):
+def play_out(me,turn,player_s,known_s,decky,tabley,sims,last_taken_s):
     possible_cards=player_s[me^1]+decky
    # print(possible_cards)
     new_hands=[[],[]]
@@ -175,9 +181,11 @@ def play_out(me,turn,player_s,known_s,decky,tabley,sims):
         sims=1
 
     avg_point_diff=0
-    time_me_took_last=0
+    avg_point_diff=0
+    #time_me_took_last=0
     avg_card_taken=[0,0]
     state_cache=dict()
+    bonus={1,10,11,12,13,14}
     cache_hits=0
     cc_hits=0
     most_possible_takes=len(tabley)+len(player_s[0])+len(player_s[1])
@@ -187,6 +195,7 @@ def play_out(me,turn,player_s,known_s,decky,tabley,sims):
         tmp_known_s=list(known_s)
         new_hands[me ^ 1]=random.sample(possible_cards,len(player_s[me^1]))
         state=set()
+        took_last=last_taken
         for card in new_hands[me ^ 1]:
             if card[0]=="10 baklava":
                 state.add(10.5)
@@ -207,8 +216,8 @@ def play_out(me,turn,player_s,known_s,decky,tabley,sims):
                 avg_point_diff += point_diff
                 avg_card_taken[0] += card_diff[0]
                 avg_card_taken[1] += card_diff[1]
-                if took_last == me:
-                    time_me_took_last += 1
+                # if took_last == me:
+                #     time_me_took_last += 1
                 sims = i
                 avraged_taken_0 = math.ceil(avg_card_taken[0] / sims)
                 avraged_taken_1 = math.ceil(avg_card_taken[1] / sims)
@@ -220,21 +229,21 @@ def play_out(me,turn,player_s,known_s,decky,tabley,sims):
                 else:
                     weight_taken_0 = 0
                     weight_taken_1 = 0
-                return avg_point_diff / sims, (weight_taken_0, weight_taken_1), me if time_me_took_last > sims / 2 else me ^ 1
+                return avg_point_diff / sims, (weight_taken_0, weight_taken_1)#, me if time_me_took_last > sims / 2 else me ^ 1
 
         else:
             cc_hits=0
             new_hands[me] = list(player_s[me])
                 # print("best_moves",best_moves_dict)
             point_diff=0
-            took_last=-1
+            #took_last=-1
             card_diff=[0,0]
             iters=0
-            while (len(new_hands[me])>0 or len(new_hands[me^1])>0) and iters<4:
+            while (len(new_hands[me])>0 or len(new_hands[me^1])>0) and iters<8:
                 iters+=1
                 best_moves = most_valuable(generate_possible(tmp_tabley))
                 topk = heapq.nlargest(14, best_moves.items(),
-                                      key=lambda kv: score_combo(kv[1]))
+                                      key=lambda kv: table_points(kv[1])+(kv[0] in bonus)+len(kv[1]))
                 #print("turnacs tunr",turnac,"lenths",len(new_hands[turnac]),len(new_hands[turnac^1]))
                 hero_hand_dict = {num: (string, num) for string, num in new_hands[me]}
                 opp_hand_dict = {num: (string, num) for string, num in new_hands[me ^ 1]}
@@ -243,6 +252,7 @@ def play_out(me,turn,player_s,known_s,decky,tabley,sims):
                 hands_dicts[me ^ 1] = opp_hand_dict
                 took=False
                 for key,value in topk:
+
                     key_to_check=1 if key==11 else key
                     if key_to_check in hands_dicts[turnac]:
                         turnacs_cards=hands_dicts[turnac]
@@ -251,10 +261,10 @@ def play_out(me,turn,player_s,known_s,decky,tabley,sims):
 
                         to_take = value
                         if turnac==me:
-                            point_diff+=table_points(to_take)+(1 if key in {1,10,11,12,13,14} else 0+dict_values[thrown[0]] if thrown[0] in dict_values else 0)
+                            point_diff+=table_points(to_take)+(1 if key in {1,10,11,12,13,14} else 0)
                             card_diff[me]+=len(to_take)+1
                         else:
-                            point_diff -= table_points(to_take)+(1 if key in {1,10,11,12,13,14} else 0+dict_values[thrown[0]] if thrown[0] in dict_values else 0)
+                            point_diff -= table_points(to_take)+(1 if key in {1,10,11,12,13,14} else 0)
                             card_diff[me^1]= len(to_take) + 1
 
                         took_last = turnac
@@ -282,14 +292,20 @@ def play_out(me,turn,player_s,known_s,decky,tabley,sims):
                     tmp_known_s[thrown[1]] += 0.5
                 else:
                     tmp_known_s[thrown[1]] += 1
+                if len(new_hands[me]) == 0 and len(new_hands[me^1])==0 and len(decky)== 0:
+                    if took_last==me:
+                        point_diff+=table_points(tmp_tabley)
+                    else:
+                        point_diff-=table_points(tmp_tabley)
+
                 turnac=turnac^1
             state_cache[state]=(point_diff, card_diff, took_last)
         avg_point_diff+=point_diff
         avg_card_taken[0]+=card_diff[0]
         avg_card_taken[1]+=card_diff[1]
 
-        if took_last==me:
-            time_me_took_last+=1
+        # if took_last==me:
+        #     time_me_took_last+=1
 
     avraged_taken_0=math.ceil(avg_card_taken[0] / sims)
     avraged_taken_1 = math.ceil(avg_card_taken[1] / sims)
@@ -302,7 +318,7 @@ def play_out(me,turn,player_s,known_s,decky,tabley,sims):
         weight_taken_0=0
         weight_taken_1=0
     #print("weight_taken_0",weight_taken_0,"weight_taken_1",weight_taken_1)
-    return avg_point_diff/sims,(weight_taken_0,weight_taken_1),me if time_me_took_last>sims/2 else me^1
+    return avg_point_diff/sims,(weight_taken_0,weight_taken_1)#,me if time_me_took_last>sims/2 else me^1
     #print("play_out sees the follwoing",point_diff,card_diff,took_last," for player turn ",turn,"hero is ",me)
 def evaluate_table(table,top_combos,known_s,lenth_hand,enemy_hand): #da issimuliram raci
     if(len(table)==0):
@@ -456,49 +472,104 @@ def most_valuable(combis):
                     missing.discard(i)
             agregate=list(agregate)
             if len(agregate)!=0:
-                cur_score=table_points(agregate)+(1 if value in [1,11,12,13,14] else 0)+len(agregate)
+                cur_score=table_points(agregate)+(1 if value in [1,11,12,13,14] else 0)+len(agregate)/52
             if(cur_score > max_score):
                 max_score=cur_score
                 best_agregate=list(agregate)
         best[value]=list(best_agregate)
     #print("best are",best)
     return best
-def generate_possible(cards): #cards se tii na table
-    #ako gi sortiram, worst case , 1 2 3 4 5 6 7 8 9 10 12 13 14, male i kec treba kak 11 i 1 da se glede, 3 fors idea utre piti chat gpt
-    #dict{value:indexi na karti}
-    #dict{value:indexi na karti}
-    #na krajta na listata da stavam najvrednata kombinacija
-    #lista od index na karti uredu
-    #da go reworkname,da chuva vrednost: [[imina na karti],[imina na karti]]
-    n=len(cards)
-    z=0 #tuka ke zapishuvam koi od takvoto se probani
-    MASK=(1<<n)-1 #& so tva i dobivam baran broj vrednosti, isto taka od 0 do so ke odame
-    combinations = defaultdict(list)
-    #za so kec, izbirash situacija dek so eden od nih e 11 samo ednash i posle redovno, i posle dvete sumi gi razgleduvash, Ba si mamata kak ke debagiram ama aj, chatgpt da ti srede raka kak od gornite
-    for i in range(int(MASK)):
-        z+=1
-        ids=set_bit_indices(z)
-        card_combo=[cards[idx] for idx in ids]
-        #print("looking at cards ",card_combo)
-        suma=0
-        sumA=0
-        first_ace=False
-        for index in ids:#ids na cards na table so gi razgleduvame, ako ima vred 1 ke proba so 1 prvo, posle so 11, else redovno
 
-            if cards[index][1]==1 and first_ace==False:
-                first_ace=True
-                sumA+=11
+
+def _canon_table_key(cards):
+    # cards are tuples like ("10 baklava", 10)
+    # canonicalize: order-independent, hashable
+    return tuple(sorted(cards, key=lambda c: (c[0], c[1])))
+
+
+@lru_cache(maxsize=4096)
+def _generate_possible_cached(key):
+    cards = list(key)  # back to list for computation
+
+    n = len(cards)
+    z = 0
+    MASK = (1 << n) - 1
+    combos = defaultdict(list)
+
+    for _ in range(int(MASK)):
+        z += 1
+        ids = set_bit_indices(z)
+        card_combo = [cards[idx] for idx in ids]
+
+        suma = 0
+        sumA = 0
+        first_ace = False
+        for index in ids:
+            if cards[index][1] == 1 and not first_ace:
+                first_ace = True
+                sumA += 11
             else:
-                sumA+=cards[index][1]
-            suma+=cards[index][1]  #sumire site dek so bitovte se 1
-        if suma<15:
-            combinations[suma].append(card_combo) #ak e validno dodava vrednost so tii sumi tamka
-        if first_ace==True and sumA<15:
-            combinations[sumA].append(card_combo)
-    for k in combinations:
-        combinations[k].sort(key=score_combo,reverse=True)
-    #print(combinations)
-    return combinations
+                sumA += cards[index][1]
+            suma += cards[index][1]
+
+        if suma < 15:
+            combos[suma].append(card_combo)
+        if first_ace and sumA < 15:
+            combos[sumA].append(card_combo)
+
+    # sort and freeze (tuples) so the cached object is immutable
+    frozen = {}
+    for k, lst in combos.items():
+        lst.sort(key=score_combo, reverse=True)
+        frozen[k] = tuple(tuple(c) for c in lst)  # tuple-of-tuples
+
+    # return an immutable dict-like (plain dict is fine as long as values are tuples)
+    return tuple(sorted(frozen.items()))  # fully hashable & stable
+    # (alternatively: return frozen as a dict; lru_cache is fine with mutable returns,
+    # but keeping it immutable prevents accidental mutation)
+
+
+def generate_possible(cards):
+    """Public wrapper returning a normal dict of tuple-of-tuples (read-only-ish)."""
+    serialized = _generate_possible_cached(_canon_table_key(tuple(cards)))
+    return {k: v for k, v in serialized}
+# def generate_possible(cards): #cards se tii na table
+#     #ako gi sortiram, worst case , 1 2 3 4 5 6 7 8 9 10 12 13 14, male i kec treba kak 11 i 1 da se glede, 3 fors idea utre piti chat gpt
+#     #dict{value:indexi na karti}
+#     #dict{value:indexi na karti}
+#     #na krajta na listata da stavam najvrednata kombinacija
+#     #lista od index na karti uredu
+#     #da go reworkname,da chuva vrednost: [[imina na karti],[imina na karti]]
+#     n=len(cards)
+#     z=0 #tuka ke zapishuvam koi od takvoto se probani
+#     MASK=(1<<n)-1 #& so tva i dobivam baran broj vrednosti, isto taka od 0 do so ke odame
+#     combinations = defaultdict(list)
+#     #za so kec, izbirash situacija dek so eden od nih e 11 samo ednash i posle redovno, i posle dvete sumi gi razgleduvash, Ba si mamata kak ke debagiram ama aj, chatgpt da ti srede raka kak od gornite
+#     for i in range(int(MASK)):
+#         z+=1
+#         ids=set_bit_indices(z)
+#         card_combo=[cards[idx] for idx in ids]
+#         #print("looking at cards ",card_combo)
+#         suma=0
+#         sumA=0
+#         first_ace=False
+#         for index in ids:#ids na cards na table so gi razgleduvame, ako ima vred 1 ke proba so 1 prvo, posle so 11, else redovno
+#
+#             if cards[index][1]==1 and first_ace==False:
+#                 first_ace=True
+#                 sumA+=11
+#             else:
+#                 sumA+=cards[index][1]
+#             suma+=cards[index][1]  #sumire site dek so bitovte se 1
+#         if suma<15:
+#             combinations[suma].append(card_combo) #ak e validno dodava vrednost so tii sumi tamka
+#         if first_ace==True and sumA<15:
+#             combinations[sumA].append(card_combo)
+#     for k in combinations:
+#         combinations[k].sort(key=score_combo,reverse=True)
+#     #print(combinations)
+#     return combinations
+
 # ---- Game API (implement these for your game state) ----
 
 
@@ -535,7 +606,7 @@ class Game(Protocol):
 
         bonus = {1, 10, 11, 12, 13, 14}
 
-        exp,tt_cards,exp3=play_out(me,turn,list(players_s),list(known_s),list(deck_s),list(table_s),1000)
+        exp,tt_cards=play_out(me,turn,list(players_s),list(known_s),list(deck_s),list(table_s),12000,last_taken_s)
         #print("taken cards expectations",exp2)
         majority_cards=0
         if len(taken_s[me])+tt_cards[me]>26:
@@ -1038,9 +1109,9 @@ class Game(Protocol):
         combinations=generate_possible(table_s) #od tabla sho mozhe da se zema
         for card in hand: #
             if card[1]==1:
-                all_possible=possible_takes(combinations[11]) #se so mozhe da se zema taka
+                all_possible=possible_takes(combinations.get(11, [])) #se so mozhe da se zema taka
             else:
-                all_possible=possible_takes(combinations[card[1]]) #dodani Aces u legal moves
+                all_possible=possible_takes(combinations.get(card[1], [])) #dodani Aces u legal moves
             for possible in all_possible:
                 moves.append((card,tuple(possible),turn))
         # for move in moves:
@@ -1126,7 +1197,7 @@ class Game(Protocol):
 
         best_dict = most_valuable(combinations)
         topk = heapq.nlargest(14, best_dict.items(),
-                              key=lambda kv: score_combo(kv[1]))
+                              key=lambda kv: table_points(kv[1])+(kv[0] in {1,10,11,12,13,14})+len(kv[1]))
         #best_moves_dict = dict(topk)
         not_takeable=0
         #print("chance outcomes called forplayers turn ",turn)
@@ -1162,7 +1233,7 @@ class Game(Protocol):
 
             new_table = [c for c in table_s if c not in to_remove]
             not_takeable += cards_left
-            if len(new_table) == 0 and len(deck_s) != 0:
+            if len(new_table) == 0 and len(deck_s)+len(players_s[1])+len(players_s[0]) >1:
                 new_pisma_s[turn] += 1
             if key == 11:
                 new_known_s[1] += 1  # oti frle takva karta i saa ja znaame
